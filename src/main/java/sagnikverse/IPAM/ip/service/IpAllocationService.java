@@ -2,147 +2,185 @@ package sagnikverse.IPAM.ip.service;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
-import sagnikverse.IPAM.engine.allocation.IpAllocator;
 import sagnikverse.IPAM.ip.entity.IpAddress;
 import sagnikverse.IPAM.ip.entity.IpStatus;
 import sagnikverse.IPAM.ip.repository.IpRepository;
-import sagnikverse.IPAM.locking.RedisLockService;
-import sagnikverse.IPAM.network.dto.SubnetUtilization;
+import sagnikverse.IPAM.network.entity.Network;
+import sagnikverse.IPAM.network.repository.NetworkRepository;
+import sagnikverse.IPAM.util.IpAddressConverter;
 
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 import java.util.stream.Collectors;
-
 
 @Service
 @RequiredArgsConstructor
 public class IpAllocationService {
 
     private final IpRepository ipRepository;
-    private final IpAllocator allocator;
-    private final RedisLockService lockService;
+    private final NetworkRepository networkRepository;
 
+    /**
+     * Allocate next available IP (O(n) scan)
+     */
     public IpAddress allocateNextIp(Long subnetId,
                                     String startIp,
-                                    String endIp){
+                                    String endIp) {
 
-        String lockKey = "lock:subnet:" + subnetId;
+        Network network = networkRepository
+                .findById(subnetId)
+                .orElseThrow(() -> new RuntimeException("Subnet not found"));
 
-        if(!lockService.acquireLock(lockKey))
-            throw new RuntimeException("Allocation in progress");
+        long networkLong =
+                IpAddressConverter.ipToLong(network.getNetworkAddress());
 
-        try {
+        long broadcastLong =
+                IpAddressConverter.ipToLong(network.getBroadcastAddress());
 
-            Set<String> allocatedIps =
-                    ipRepository.findBySubnetId(subnetId)
-                            .stream()
-                            .map(IpAddress::getIpAddress)
-                            .collect(Collectors.toSet());
+        Set<String> allocated =
+                ipRepository.findBySubnetId(subnetId)
+                        .stream()
+                        .map(IpAddress::getIpAddress)
+                        .collect(Collectors.toSet());
 
-            String nextIp =
-                    allocator.findNextAvailableIp(
-                            startIp,
-                            endIp,
-                            allocatedIps
-                    );
+        long start = IpAddressConverter.ipToLong(startIp);
+        long end = IpAddressConverter.ipToLong(endIp);
 
-            IpAddress ip = new IpAddress();
+        for(long ip = start; ip <= end; ip++){
 
-            ip.setSubnetId(subnetId);
-            ip.setIpAddress(nextIp);
-            ip.setStatus(IpStatus.ALLOCATED);
-            ip.setAllocatedAt(LocalDateTime.now());
+            if(ip == networkLong || ip == broadcastLong){
+                continue;
+            }
 
-            return ipRepository.save(ip);
+            String ipStr = IpAddressConverter.longToIp(ip);
 
-        } finally {
+            if(!allocated.contains(ipStr)){
 
-            lockService.releaseLock(lockKey);
+                IpAddress entity = new IpAddress();
+
+                entity.setSubnetId(subnetId);
+                entity.setIpAddress(ipStr);
+                entity.setStatus(IpStatus.ALLOCATED);
+                entity.setAllocatedAt(LocalDateTime.now());
+
+                return ipRepository.save(entity);
+            }
         }
 
+        throw new RuntimeException("No free IP available");
     }
 
-    public void releaseIp(String ipAddress){
+    /**
+     * Allocate a specific IP
+     */
+    public IpAddress allocateSpecificIp(Long subnetId, String ip){
 
-        IpAddress ip = ipRepository
-                .findByIpAddress(ipAddress)
-                .orElseThrow(() ->
-                        new RuntimeException("IP not found"));
+        Network network = networkRepository
+                .findById(subnetId)
+                .orElseThrow(() -> new RuntimeException("Subnet not found"));
 
-        ipRepository.delete(ip);
+        long ipLong = IpAddressConverter.ipToLong(ip);
 
-    }
+        long networkLong =
+                IpAddressConverter.ipToLong(network.getNetworkAddress());
 
-    public IpAddress allocateSpecificIp(Long subnetId,
-                                        String ipAddress){
+        long broadcastLong =
+                IpAddressConverter.ipToLong(network.getBroadcastAddress());
 
-        if(ipRepository.findByIpAddress(ipAddress).isPresent())
+        if(ipLong == networkLong || ipLong == broadcastLong){
+            throw new RuntimeException("Reserved network/broadcast IP");
+        }
+
+        if(ipRepository.existsByIpAddress(ip)){
             throw new RuntimeException("IP already allocated");
+        }
 
-        IpAddress ip = new IpAddress();
+        IpAddress entity = new IpAddress();
 
-        ip.setSubnetId(subnetId);
-        ip.setIpAddress(ipAddress);
-        ip.setStatus(IpStatus.ALLOCATED);
-        ip.setAllocatedAt(LocalDateTime.now());
+        entity.setSubnetId(subnetId);
+        entity.setIpAddress(ip);
+        entity.setStatus(IpStatus.ALLOCATED);
+        entity.setAllocatedAt(LocalDateTime.now());
 
-        return ipRepository.save(ip);
-
+        return ipRepository.save(entity);
     }
 
+    /**
+     * Release an allocated IP
+     */
+    public void releaseIp(String ip){
+
+        Optional<IpAddress> optional =
+                ipRepository.findByIpAddress(ip);
+
+        if(optional.isEmpty()){
+            return;
+        }
+
+        ipRepository.delete(optional.get());
+    }
+
+    /**
+     * List IPs in subnet
+     */
     public List<IpAddress> getIpsOfSubnet(Long subnetId){
 
         return ipRepository.findBySubnetId(subnetId);
     }
 
-
-    public SubnetUtilization getUtilization(Long subnetId,
-                                            long totalIps){
-
-        long allocated =
-                ipRepository.findBySubnetId(subnetId).size();
-
-        long free = totalIps - allocated;
-
-        double percent =
-                ((double) allocated / totalIps) * 100;
-
-        SubnetUtilization util =
-                new SubnetUtilization();
-
-        util.setTotalIps(totalIps);
-        util.setAllocatedIps(allocated);
-        util.setFreeIps(free);
-        util.setUtilization(percent);
-
-        return util;
-    }
-
-
+    /**
+     * Bulk allocate IPs
+     */
 
     public List<IpAddress> bulkAllocate(Long subnetId,
                                         int count,
                                         String startIp,
                                         String endIp){
 
-        List<IpAddress> allocatedIps =
-                new ArrayList<>();
+        Network network = networkRepository
+                .findById(subnetId)
+                .orElseThrow(() -> new RuntimeException("Subnet not found"));
 
-        for(int i=0;i<count;i++){
+        long networkLong =
+                IpAddressConverter.ipToLong(network.getNetworkAddress());
 
-            IpAddress ip =
-                    allocateNextIp(
-                            subnetId,
-                            startIp,
-                            endIp
-                    );
+        long broadcastLong =
+                IpAddressConverter.ipToLong(network.getBroadcastAddress());
 
-            allocatedIps.add(ip);
+        long start = IpAddressConverter.ipToLong(startIp);
+        long end = IpAddressConverter.ipToLong(endIp);
+
+        Set<String> allocated =
+                ipRepository.findBySubnetId(subnetId)
+                        .stream()
+                        .map(IpAddress::getIpAddress)
+                        .collect(Collectors.toSet());
+
+        List<IpAddress> result = new ArrayList<>();
+
+        for(long ip = start; ip <= end && result.size() < count; ip++){
+
+            if(ip == networkLong || ip == broadcastLong){
+                continue;
+            }
+
+            String ipStr = IpAddressConverter.longToIp(ip);
+
+            if(!allocated.contains(ipStr)){
+
+                IpAddress entity = new IpAddress();
+
+                entity.setSubnetId(subnetId);
+                entity.setIpAddress(ipStr);
+                entity.setStatus(IpStatus.ALLOCATED);
+                entity.setAllocatedAt(LocalDateTime.now());
+
+                result.add(entity);
+                allocated.add(ipStr);
+            }
         }
 
-        return allocatedIps;
-
+        return ipRepository.saveAll(result);
     }
+
 }

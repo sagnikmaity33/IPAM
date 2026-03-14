@@ -2,6 +2,7 @@ package sagnikverse.IPAM.network.service;
 
 
 
+import org.springframework.data.redis.core.StringRedisTemplate;
 import sagnikverse.IPAM.engine.cidr.CidrCalculator;
 import sagnikverse.IPAM.engine.cidr.CidrParser;
 import sagnikverse.IPAM.engine.cidr.ParsedCidr;
@@ -15,6 +16,8 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
 import java.util.List;
 
+import static org.apache.naming.SelectorContext.prefix;
+
 @Service
 @RequiredArgsConstructor
 public class NetworkService {
@@ -24,6 +27,7 @@ public class NetworkService {
     private final CidrCalculator cidrCalculator;
     private final CidrValidator validator;
     private final OverlapDetector overlapDetector;
+    private final StringRedisTemplate redisTemplate;
 
     public Network createNetwork(String cidr){
 
@@ -79,12 +83,10 @@ public class NetworkService {
             )){
                 throw new RuntimeException("Subnet overlap detected");
             }
-
         }
 
         return networkRepository.save(network);
     }
-
 
 
 }

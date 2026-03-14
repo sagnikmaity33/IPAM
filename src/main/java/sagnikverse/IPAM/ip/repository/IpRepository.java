@@ -13,6 +13,6 @@ public interface IpRepository extends JpaRepository<IpAddress, Long> {
 
     List<IpAddress> findBySubnetId(Long subnetId);
 
-
+    boolean existsByIpAddress(String ip);
 
 }

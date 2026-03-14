@@ -2,9 +2,9 @@ package sagnikverse.IPAM.ip.controller;
 
 import sagnikverse.IPAM.ip.dto.BulkAllocationRequest;
 import sagnikverse.IPAM.ip.entity.IpAddress;
-import sagnikverse.IPAM.ip.service.IpAllocationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
+import sagnikverse.IPAM.ip.service.IpAllocationService;
 
 import java.util.List;
 
