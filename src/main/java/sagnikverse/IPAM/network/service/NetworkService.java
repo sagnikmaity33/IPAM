@@ -50,6 +50,16 @@ public class NetworkService {
         long totalIps =
                 cidrCalculator.totalIps(parsed.getPrefix());
 
+        long newStart =
+                cidrCalculator.ipToLong(networkAddress);
+
+        long newEnd =
+                cidrCalculator.ipToLong(broadcastAddress);
+
+        if(overlapDetector.hasOverlap(newStart,newEnd)){
+            throw new RuntimeException("Subnet overlap detected");
+        }
+
         Network network = new Network();
 
         network.setCidr(cidr);
@@ -57,33 +67,6 @@ public class NetworkService {
         network.setBroadcastAddress(broadcastAddress);
         network.setTotalIps(totalIps);
         network.setCreatedAt(LocalDateTime.now());
-
-        List<Network> existingNetworks =
-                networkRepository.findAll();
-
-        long newStart =
-                cidrCalculator.ipToLong(networkAddress);
-
-        long newEnd =
-                cidrCalculator.ipToLong(broadcastAddress);
-
-        for(Network net : existingNetworks){
-
-            long start =
-                    cidrCalculator.ipToLong(net.getNetworkAddress());
-
-            long end =
-                    cidrCalculator.ipToLong(net.getBroadcastAddress());
-
-            if(overlapDetector.isOverlapping(
-                    newStart,
-                    newEnd,
-                    start,
-                    end
-            )){
-                throw new RuntimeException("Subnet overlap detected");
-            }
-        }
 
         return networkRepository.save(network);
     }

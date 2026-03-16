@@ -1,147 +1,188 @@
-# IP Address Manager (IPAM) – Phase 1
+Overview
 
-A **production-style backend system** for managing IP networks and address allocation, built using **Spring Boot, PostgreSQL, Redis, and Docker**.
+IPAM (IP Address Management) is a backend system designed to manage network subnets and IP allocations efficiently.
 
-This project is designed as a **learning + interview-ready system design project** to demonstrate:
+This project implements a scalable backend architecture capable of managing large network infrastructures by combining:
 
-* Backend architecture
-* Networking algorithms
-* Scalable service design
-* Distributed locking
-* Containerized environments
+CIDR-based subnet management
 
----
+hierarchical network organization
 
-# 1. Project Goal
+high-performance IP allocation using Redis bitmaps
 
-Organizations with large infrastructures manage thousands of IP addresses.
-Without automation, they face problems like:
+PostgreSQL persistence
 
-* Duplicate IP allocation
-* Network conflicts
-* Poor visibility of IP utilization
-* Manual tracking via spreadsheets
+modular engine-based architecture
 
-This system provides a **backend service to manage networks, subnets, and IP allocations automatically**.
+Phase-2 extends the Phase-1 implementation by introducing:
 
----
+Network hierarchy
 
-# 2. System Architecture
+Redis bitmap allocation
 
-The project follows a **Clean Modular Architecture**.
+engine-based architecture
 
-```
-Client
-   │
-REST API (Controllers)
-   │
-Application Services
-   │
-Domain Engines (Algorithms)
-   │
-Repository Layer
-   │
-Database (PostgreSQL)
+scalable validation and CIDR processing
 
-+ Redis (Distributed Locking)
-```
+Technology Stack
+Layer	Technology
+Backend	Spring Boot
+Language	Java 17
+Database	PostgreSQL
+Cache	Redis
+Build Tool	Maven
+Containerization	Docker
+System Architecture
 
-### Key Layers
+The system follows a layered architecture with clear separation of responsibilities.
 
-| Layer      | Purpose               |
-| ---------- | --------------------- |
-| Controller | Handles HTTP requests |
-| Service    | Business logic        |
-| Engine     | Core algorithms       |
-| Repository | Database access       |
-| Database   | Persistent storage    |
-| Redis      | Distributed locking   |
+What is this?
+Layered Architecture
+Controller Layer
 
----
+Controllers expose REST APIs to interact with the system.
 
-# 3. Tech Stack
+Controllers:
 
-| Technology      | Purpose              |
-| --------------- | -------------------- |
-| Java 17         | Programming Language |
-| Spring Boot 3   | Backend framework    |
-| Spring Data JPA | ORM                  |
-| PostgreSQL      | Database             |
-| Redis           | Distributed locking  |
-| Docker          | Containerization     |
-| Maven           | Build tool           |
+NetworkController
+IpController
+NetworkHierarchyController
 
----
+Example endpoints:
 
-# 4. Project Structure
+POST /api/networks
+POST /api/networks/{id}/subnet
+POST /api/ip/allocate
+POST /api/ip/bulk-allocate
+DELETE /api/ip/{ip}
+GET /api/networks/tree
 
-```
-src/main/java/com/ipam
+Responsibilities:
 
-config
-common
+handle HTTP requests
 
-engine
-   cidr
-      CidrCalculator.java
-      CidrParser.java
+validate inputs
 
-   allocation
-      IpAllocator.java
+call service layer
 
-   validation
-      CidrValidator.java
-      OverlapDetector.java
+Service Layer
 
-network
-   controller
-   service
-   repository
-   entity
-   dto
+The service layer contains business logic and orchestrates interactions between engines and repositories.
 
-ip
-   controller
-   service
-   repository
-   entity
-   dto
+Services:
 
-locking
-   RedisLockService.java
+NetworkService
+NetworkHierarchyService
+IpAllocationService
+SubnetSplitService
+NetworkTreeService
 
-IpamApplication.java
-```
+Responsibilities:
 
-### Design Principles
+Network creation
+Subnet hierarchy management
+IP allocation orchestration
+Validation coordination
+Data persistence
+Engine Layer
 
-* **Loosely Coupled Modules**
-* **Single Responsibility**
-* **Algorithm Isolation in Engines**
+The engine layer performs core computational logic.
 
----
+Separating computation into engines makes the architecture modular and scalable.
 
-# 5. Database Design
+CIDR Engine
 
-## Networks Table
+Components:
 
-```
+CidrParser
+CidrCalculator
+ParsedCidr
+
+Responsibilities:
+
+Parse CIDR notation
+Calculate network address
+Calculate broadcast address
+Compute total IP addresses
+Convert IP addresses to numeric format
+
+Example:
+
+CIDR: 10.1.1.0/24
+Network: 10.1.1.0
+Broadcast: 10.1.1.255
+Total IPs: 256
+Validation Engine
+
+Components:
+
+CidrValidator
+OverlapDetector
+HierarchyValidator
+
+Responsibilities:
+
+Validate CIDR format
+Prevent overlapping subnets
+Validate subnet hierarchy relationships
+
+Overlap detection logic:
+
+start1 <= end2 && start2 <= end1
+
+This ensures no two networks overlap.
+
+Allocation Engine
+
+Component:
+
+RedisBitmapAllocator
+
+This engine provides high performance IP allocation.
+
+Redis stores subnet allocation state as a bitmap.
+
+Example Redis key:
+
+ipam:bitmap:subnet:5
+
+Each bit represents an IP address.
+
+0 = free
+1 = allocated
+
+Example bitmap:
+
+000010011
+
+Redis operations used:
+
+BITPOS
+SETBIT
+GETBIT
+
+Time complexity:
+
+O(1)
+
+This allows extremely fast IP allocation even for large subnets.
+
+Data Layer
+PostgreSQL
+
+Stores persistent metadata.
+
+Tables:
+
 networks
----------------------------
 id
 cidr
 network_address
 broadcast_address
 total_ips
-description
+parent_network_id
 created_at
-```
-
-## IP Addresses Table
-
-```
 ip_addresses
----------------------------
 id
 subnet_id
 ip_address
@@ -151,345 +192,98 @@ mac_address
 device_type
 owner
 allocated_at
-```
 
-### IP Status
+PostgreSQL acts as the source of truth for all network data.
 
-```
-ALLOCATED
-FREE
-RESERVED
-```
-
----
-
-# 6. Core Algorithms
-
-## CIDR Calculation
-
-CIDR is used to determine the network boundaries.
-
-Example:
-
-```
-192.168.1.0/24
-```
-
-Results:
-
-```
-Network Address  → 192.168.1.0
-Broadcast Address → 192.168.1.255
-Total IPs        → 256
-Usable Range     → 192.168.1.1 – 192.168.1.254
-```
-
-The system converts IP addresses into **32-bit integers** to perform efficient bitwise operations.
-
----
-
-## Subnet Overlap Detection
-
-Two networks overlap if their IP ranges intersect.
-
-Example:
-
-```
-Subnet A
-192.168.1.0/24
-Range: 192.168.1.0 – 192.168.1.255
-
-Subnet B
-192.168.1.128/25
-Range: 192.168.1.128 – 192.168.1.255
-```
-
-These networks overlap.
-
-Algorithm:
-
-```
-startA ≤ endB
-AND
-startB ≤ endA
-```
-
-To perform this comparison efficiently, the system converts IPs to numeric values.
-
----
-
-## IP Allocation Algorithm
-
-When allocating an IP:
-
-1. Convert usable IP range to numeric values
-2. Retrieve allocated IPs from database
-3. Iterate from start → end
-4. Return first free IP
-
-Example:
-
-Allocated:
-
-```
-192.168.1.1
-192.168.1.2
-192.168.1.4
-```
-
-Next available:
-
-```
-192.168.1.3
-```
-
----
-
-# 7. Redis Distributed Lock
-
-Concurrent requests may try to allocate the same IP.
-
-Example race condition:
-
-```
-Request A → allocate 192.168.1.10
-Request B → allocate 192.168.1.10
-```
-
-To prevent this:
-
-```
-Redis Lock
-lock:subnet:{id}
-```
-
-Only one allocation operation can execute at a time.
-
----
-
-# 8. Phase-1 Features
-
-### Network Management
-
-* Create subnet using CIDR
-* Calculate network details
-* List all subnets
-* Update subnet metadata
-* Delete subnet
-* Subnet utilization statistics
-
-### IP Allocation
-
-* Allocate next available IP
-* Allocate specific IP
-* Release IP
-* Bulk IP allocation
-* List subnet IPs
-
-### Conflict Detection
-
-* CIDR validation
-* Prevent subnet overlap
-* Prevent duplicate IP allocation
-* Reserve network and broadcast IPs
-
----
-
-# 9. API Endpoints
-
-## Network APIs
-
-```
-POST   /api/networks
-GET    /api/networks
-GET    /api/networks/{id}
-DELETE /api/networks/{id}
-```
-
-## IP APIs
-
-```
-POST   /api/ip/allocate
-POST   /api/ip/allocate-specific
-POST   /api/ip/bulk-allocate
-DELETE /api/ip/{ip}
-GET    /api/ip/subnet/{id}
-```
-
----
-
-# 10. Running the Project with Docker
-
-## Step 1 – Clone the Repository
-
-```
-git clone https://github.com/yourusername/ipam-backend.git
-
-cd ipam-backend
-```
-
----
-
-## Step 2 – Create Docker Compose File
-
-Create:
-
-```
-docker/docker-compose.yml
-```
-
-Content:
-
-```
-version: '3'
-
-services:
-
-  postgres:
-    image: postgres:15
-    container_name: ipam_postgres
-    environment:
-      POSTGRES_DB: ipam
-      POSTGRES_USER: ipam
-      POSTGRES_PASSWORD: ipam
-    ports:
-      - "5432:5432"
-
-  redis:
-    image: redis:7
-    container_name: ipam_redis
-    ports:
-      - "6379:6379"
-```
-
----
-
-## Step 3 – Start Infrastructure
-
-```
-docker compose up -d
-```
-
-This starts:
-
-```
-PostgreSQL
 Redis
-```
 
----
+Redis stores allocation state for fast lookup.
 
-## Step 4 – Run Spring Boot Application
+Example key:
 
-```
-./mvnw spring-boot:run
-```
+ipam:bitmap:subnet:{subnetId}
 
-Application will run on:
+Example:
 
-```
-http://localhost:8080
-```
+ipam:bitmap:subnet:5
 
----
+Redis enables:
 
-# 11. Testing the APIs
+O(1) allocation
+fast lookup
+minimal memory usage
+Network Hierarchy
 
-You can test using:
+Phase-2 introduces hierarchical subnet management.
 
-* Postman
-* Curl
-* HTTPie
+Example hierarchy:
 
----
+10.0.0.0/8
+└── 10.1.0.0/16
+└── 10.1.1.0/24
 
-## Create Subnet
+Hierarchy rules:
 
-```
-POST /api/networks
-```
+Child subnet must lie inside parent subnet
+Child subnets must not overlap
 
-Body:
+Hierarchy validation ensures correct network organization.
 
-```
-192.168.1.0/24
-```
+Network Creation Flow
+What is this?
+IP Allocation Flow
+What is this?
+Subnet Hierarchy Flow
+What is this?
+Deployment Architecture
 
----
+The application is deployed using Docker containers.
 
-## Allocate Next IP
+What is this?
 
-```
-POST /api/ip/allocate
-```
+Containers:
 
-Parameters:
+Spring Boot Application
+PostgreSQL Database
+Redis Cache
+Performance Optimizations
+Feature	Benefit
+Redis Bitmap Allocation	O(1) IP allocation
+CIDR Engine	Efficient subnet calculation
+Hierarchy Engine	Structured network organization
+Validation Engine	Prevent invalid networks
+Example API Usage
 
-```
-subnetId=1
-startIp=192.168.1.1
-endIp=192.168.1.254
-```
+Create network:
 
----
+curl -X POST http://localhost:8080/api/networks \
+-H "Content-Type: application/json" \
+-d "10.0.0.0/8"
 
-## Allocate Specific IP
+Create subnet:
 
-```
-POST /api/ip/allocate-specific
-```
+curl -X POST http://localhost:8080/api/networks/3/subnet \
+-H "Content-Type: application/json" \
+-d "10.1.0.0/16"
 
-```
-subnetId=1
-ip=192.168.1.50
-```
+Allocate IP:
 
----
+curl -X POST \
+"http://localhost:8080/api/ip/allocate?subnetId=5&startIp=10.1.1.1&endIp=10.1.1.254"
+Future Improvements
 
-## Release IP
+Possible enhancements include:
 
-```
-DELETE /api/ip/192.168.1.50
-```
+Interval tree subnet lookup
+Audit logging system
+Swagger API documentation
+Observability metrics
+Kubernetes deployment
+Summary
 
----
+Phase-2 transforms the IPAM system into a scalable backend service by introducing:
 
-## List Subnet IPs
-
-```
-GET /api/ip/subnet/1
-```
-
----
-
-# 12. Future Improvements (Phase-2)
-
-Next phase will introduce:
-
-* Subnet hierarchy
-* DHCP pools
-* IP search engine
-* Audit logging
-* Pagination
-* Prometheus monitoring
-* Role based access control
-* Kubernetes deployment
-
----
-
-# 13. Learning Outcomes
-
-This project demonstrates:
-
-* CIDR mathematics
-* Networking algorithms
-* Backend architecture
-* Distributed locking
-* Database design
-* Containerized development environments
-
----
-
-# 14. License
-
-MIT License
+Network hierarchy management
+Redis bitmap IP allocation
+Engine-based architecture
+Layered backend design

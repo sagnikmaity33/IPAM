@@ -29,4 +29,6 @@ public class Network {
     private Long totalIps;
 
     private LocalDateTime createdAt;
+
+    private Long parentNetworkId;
 }

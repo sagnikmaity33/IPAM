@@ -3,14 +3,33 @@ package sagnikverse.IPAM.engine.allocation;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
 import org.springframework.data.domain.Range;
+
+import java.util.Collections;
 
 @Component
 @RequiredArgsConstructor
 public class RedisBitmapAllocator {
 
     private final StringRedisTemplate redisTemplate;
+    private final DefaultRedisScript<Long> allocateScript;
+
+
+    /**
+     * Atomic allocation using Lua
+     */
+    public long allocateAtomic(String subnetKey) {
+
+        Long index = redisTemplate.execute(
+                allocateScript,
+                Collections.singletonList(subnetKey)
+        );
+
+        return index == null ? -1 : index;
+    }
+
 
     /**
      * Find first free IP index

@@ -2,6 +2,7 @@ package sagnikverse.IPAM.ip.service;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import sagnikverse.IPAM.engine.allocation.RedisBitmapAllocator;
 import sagnikverse.IPAM.ip.entity.IpAddress;
 import sagnikverse.IPAM.ip.entity.IpStatus;
 import sagnikverse.IPAM.ip.repository.IpRepository;
@@ -19,7 +20,7 @@ public class IpAllocationService {
 
     private final IpRepository ipRepository;
     private final NetworkRepository networkRepository;
-
+    private final RedisBitmapAllocator redisBitmapAllocator;
     /**
      * Allocate next available IP (O(n) scan)
      */
@@ -181,6 +182,38 @@ public class IpAllocationService {
         }
 
         return ipRepository.saveAll(result);
+    }
+
+
+    public IpAddress allocateFast(Long subnetId) {
+
+        String redisKey = "ipam:bitmap:subnet:" + subnetId;
+
+        long index = redisBitmapAllocator.allocateAtomic(redisKey);
+
+        if(index < 0){
+            throw new RuntimeException("No free IP available");
+        }
+
+        Network network = networkRepository
+                .findById(subnetId)
+                .orElseThrow();
+
+        long networkLong =
+                IpAddressConverter.ipToLong(network.getNetworkAddress());
+
+        long ipLong = networkLong + index;
+
+        String ipStr = IpAddressConverter.longToIp(ipLong);
+
+        IpAddress entity = new IpAddress();
+
+        entity.setSubnetId(subnetId);
+        entity.setIpAddress(ipStr);
+        entity.setStatus(IpStatus.ALLOCATED);
+        entity.setAllocatedAt(LocalDateTime.now());
+
+        return ipRepository.save(entity);
     }
 
 }
